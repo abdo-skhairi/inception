@@ -2,34 +2,36 @@
 
 set -e
 
-echo "Starting MariaDB..."
+# Start MariaDB in background first
+mysqld_safe --skip-networking &
 
-# start MariaDB in safe mode
-mysqld_safe --datadir=/var/lib/mysql &
+# Wait until it's actually ready
+until mysqladmin ping --silent; do
+    echo "Waiting for MariaDB to be ready..."
+    sleep 1
+done
 
-sleep 5
+# Only configure if not already done
+if [ ! -d "/var/lib/mysql/${MYSQL_DATABASE}" ]; then
+    echo "Configuring database..."
 
-echo "Configuring database..."
-
-# use root WITHOUT password (initial bootstrap mode)
-mysql -u root << EOF
+    mysql -u root <<EOF
 CREATE DATABASE IF NOT EXISTS ${MYSQL_DATABASE};
-
 CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'%' IDENTIFIED BY '${MYSQL_PASSWORD}';
-
 GRANT ALL PRIVILEGES ON ${MYSQL_DATABASE}.* TO '${MYSQL_USER}'@'%';
-
-FLUSH PRIVILEGES;
-EOF
-
-echo "Securing root user..."
-
-mysql -u root << EOF
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
 FLUSH PRIVILEGES;
 EOF
 
-echo "MariaDB ready."
+    echo "Database configured."
+else
+    echo "Database already configured, skipping..."
+fi
 
-# keep container alive
-wait
+# Shutdown background instance
+mysqladmin -u root --password="${MYSQL_ROOT_PASSWORD}" shutdown
+
+sleep 2
+
+# Start in foreground
+exec mysqld_safe
